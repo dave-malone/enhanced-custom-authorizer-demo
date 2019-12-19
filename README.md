@@ -188,3 +188,4 @@ export default class App extends React.Component {
 
 * Custom authorizer using signing enabled
 * use a real token example to authorize users based on token content
+* Generate restrictive policies based on principal and grants in tokens 
