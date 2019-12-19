@@ -89,7 +89,7 @@ The output of the `describe-domain-configuration` command above contains the Ful
 ```javascript
 {
     "domainConfigurationName": "customAuthorizerDomainConfiguration",
-    "domainConfigurationArn": "your-domain-configuration-arn",
+    "domainConfigurationArn": "arn:aws:iot:us-east-1:xxxxxxxxxxxx:domainconfiguration/testDomainConfiguration/abcd",
     "domainName": "xxxxxxxxxxxxxxxxxxxx-ats.iot.us-east-1.amazonaws.com",
     "serverCertificates": [],
     "authorizerConfig": {
@@ -188,4 +188,4 @@ export default class App extends React.Component {
 
 * Custom authorizer using signing enabled
 * use a real token example to authorize users based on token content
-* Generate restrictive policies based on principal and grants in tokens 
+* Generate restrictive policies based on principal and grants in tokens
