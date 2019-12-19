@@ -1,0 +1,10 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Resources:
+  IoTEnhancedCustomAuthorizer:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: index.handler
+      Runtime: nodejs12.x
+      Timeout: 5
+      CodeUri: s3://dmmal/7046137deda7b7e8c662d6ec1ceb23f3

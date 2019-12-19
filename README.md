@@ -1,68 +1,190 @@
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
 
-## Available Scripts
+This example demonstrates the necessary steps to use Enhanced Custom Authentication and Configurable Endpoints with AWS IoT Core. At the time of writing, these features are available as public Beta only in the us-east-1 / N. Virginia region of AWS.
 
-In the project directory, you can run:
+One major disclaimer at this time: This demo was built taking the path of least resistance; a production quality implementation is pending using a more suitable approach to token validation in the Custom Authorizer AWS Lambda function, and using token signing.
 
-### `yarn start`
+Another major goal in building this demo was to illustrate the use of AWS Amplify to build browser based web applications to integrate with AWS IoT Core using new enhanced custom authorizers. Example code can be found under the [web](./web) directory of this repository.
 
-Runs the app in the development mode.<br />
-Open [http://localhost:3000](http://localhost:3000) to view it in the browser.
+## Deploy the Enhanced Custom Authorizer Lambda function
 
-The page will reload if you make edits.<br />
-You will also see any lint errors in the console.
+```bash
+DEPLOYMENT_BUCKET=mybucketname
 
-### `yarn test`
+# Package SAM template
+sam package --template-file ./lambda/sam.yml \
+  --s3-bucket $DEPLOYMENT_BUCKET \
+  --output-template-file ./lambda/packaged.yml
 
-Launches the test runner in the interactive watch mode.<br />
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+# Deploy packaged SAM template
+sam deploy --template-file ./lambda/packaged.yml \
+  --stack-name iot-enhanced-custom-authorizer-lambda-stack \
+  --capabilities CAPABILITY_IAM
 
-### `yarn build`
+# Get the physical resource ID for the Lambda function so we can grab the Lambda function ARN
+aws cloudformation describe-stack-resources \
+  --stack-name iot-enhanced-custom-authorizer-lambda-stack \
+  --query 'StackResources[?ResourceType==`AWS::Lambda::Function`].PhysicalResourceId' \
+  --output text
 
-Builds the app for production to the `build` folder.<br />
-It correctly bundles React in production mode and optimizes the build for the best performance.
+# Get the ARN for the deployed Lambda function
+aws lambda get-function --function-name lambdaPhysicalIdFromPreviousCommand --query 'Configuration.FunctionArn' --output text
+```
 
-The build is minified and the filenames include the hashes.<br />
-Your app is ready to be deployed!
+## Configure your custom authorizer with AWS IoT
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+1. First, we will register the Lambda function created above as an authorizer with AWS IoT Core:
 
-### `yarn eject`
+```bash
+aws iot create-authorizer \
+  --authorizer-name "CustomAuthorizer" \
+  --authorizer-function-arn "arn:aws:lambda:us-east-1:xxxxxxxxxxxx:function:iot-enhanced-custom-autho" \
+  --status ACTIVE \
+  --signing-disabled
+```
 
-**Note: this is a one-way operation. Once you `eject`, you can’t go back!**
+The output of the above command, if successful, will contain the ARN for your custom authorizer:
 
-If you aren’t satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
+```javascript
+  {
+      "authorizerName": "CustomAuthorizer",
+      "authorizerArn": "arn:aws:iot:us-east-1:xxxxxxxxxxxx:authorizer/CustomAuthorizer"
+  }
+```
 
-Instead, it will copy all the configuration files and the transitive dependencies (Webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you’re on your own.
 
-You don’t have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn’t feel obligated to use this feature. However we understand that this tool wouldn’t be useful if you couldn’t customize it when you are ready for it.
+2. Next, you need to grant the AWS IoT Core service principal access to invoke your custom authorizer Lambda function:
 
-## Learn More
+```bash
+aws lambda add-permission \
+  --function-name "arn:aws:lambda:us-east-1:xxxxxxxxxxxx:function:iot-enhanced-custom-autho" \
+  --principal iot.amazonaws.com \
+  --source-arn "arn:aws:iot:us-east-1:xxxxxxxxxxxx:authorizer/CustomAuthorizer" \
+  --statement-id Id-123 \
+  --action "lambda:InvokeFunction"
+```
 
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
+Now you should test your custom authorizer using the aws cli:
 
-To learn React, check out the [React documentation](https://reactjs.org/).
+```bash
+aws iot test-invoke-authorizer \
+  --authorizer-name CustomAuthorizer \
+  --http-context '{"headers":{}, "queryString": "?token=allow"}'
+```
 
-### Code Splitting
+3. After you've validated that the custom authorizer is working, set it as your default authorizer:
 
-This section has moved here: https://facebook.github.io/create-react-app/docs/code-splitting
+```bash
+# unsure if this is truly required - will test from scratch and vefiy
+aws iot set-default-authorizer --authorizer-name CustomAuthorizer
+```
 
-### Analyzing the Bundle Size
+4. Enhanced custom authorizers must be registered as part of configurable endpoints for AWS IoT Core. In this example, we will create a custom endpoint for an AWS-managed domain.
 
-This section has moved here: https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size
+```bash
+aws iot create-domain-configuration --domain-configuration-name "customAuthorizerDomainConfiguration" --service-type "DATA"
+aws iot describe-domain-configuration --domain-configuration-name "customAuthorizerDomainConfiguration"
+```
+The output of the `describe-domain-configuration` command above contains the Fully Qualified Domain Name (FQDN) you will need to use to connect your devices or applications to AWS IoT Core:
 
-### Making a Progressive Web App
+```javascript
+{
+    "domainConfigurationName": "customAuthorizerDomainConfiguration",
+    "domainConfigurationArn": "your-domain-configuration-arn",
+    "domainName": "xxxxxxxxxxxxxxxxxxxx-ats.iot.us-east-1.amazonaws.com",
+    "serverCertificates": [],
+    "authorizerConfig": {
+        "defaultAuthorizerName": "CustomAuthorizer",
+        "allowAuthorizerOverride": true
+    },
+    "domainConfigurationStatus": "ENABLED",
+    "serviceType": "DATA",
+    "domainType": "AWS_MANAGED"
+}
+```
 
-This section has moved here: https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app
+5. Finally, you need to update your domain configuration to use your custom authorizer:
 
-### Advanced Configuration
+```bash
+aws iot update-domain-configuration \
+  --domain-configuration-name "customAuthorizerDomainConfiguration" \
+  --authorizer-config '{"allowAuthorizerOverride": true,"defaultAuthorizerName": "CustomAuthorizer"}'
+```
 
-This section has moved here: https://facebook.github.io/create-react-app/docs/advanced-configuration
+## Build awesome web applications with AWS Amplify
 
-### Deployment
+Using the FQDN from your configurable AWS IoT endpoint, you can now build applications using Amplify's PubSub support by passing Tokens through as query string parameters.
 
-This section has moved here: https://facebook.github.io/create-react-app/docs/deployment
+This allows you to use any IdP, assuming you correctly validate your tokens within the Custom Authorizer and generate sensible IoT policies with least privileged access (instead of the allow all policy the example in this codebase currently generates!).
 
-### `yarn build` fails to minify
+The following is example Amplify component built in React:
 
-This section has moved here: https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify
+```javascript
+import React from 'react';
+import Amplify, { PubSub } from 'aws-amplify';
+import { MqttOverWSProvider } from "@aws-amplify/pubsub/lib/Providers";
+
+Amplify.addPluggable(new MqttOverWSProvider({
+  //here you would include your token as the query string parameter use to initialize the connection
+  aws_pubsub_endpoint: 'wss://xxxxxxxxxxxxxxxxxxxx-ats.iot.us-east-1.amazonaws.com/mqtt?token=allow',
+}));
+
+function MessageList(props){
+  const messages = props.messages
+  const listItems = messages.map((data, i) =>
+    <li key={i}>{data.client_received_at.toString()} - {data.message}</li>
+  )
+
+  return(
+    <ul>{listItems}</ul>
+  )
+}
+
+export default class App extends React.Component {
+
+  constructor(props){
+    super(props)
+    this.state = {messages:[]}
+  }
+
+  componentDidMount(){
+    PubSub.subscribe('#').subscribe({
+        next: data => {
+          data.value.client_received_at = new Date()
+          console.log(`Message received: ${JSON.stringify(data.value)}`)
+          this.setState(prevState => ({
+            messages: [...prevState.messages, data.value]
+          }))
+        },
+        error: error => console.error(error),
+        close: () => console.log('Done'),
+    })
+  }
+
+  render(){
+    const messages = this.state.messages
+
+    return (
+      <div className="App">
+        <MessageList messages={messages} />
+      </div>
+    )
+  }
+}
+```
+
+## Resources
+
+* https://aws.amazon.com/blogs/security/how-to-use-your-own-identity-and-access-management-systems-to-control-access-to-aws-iot-resources/
+* https://docs.aws.amazon.com/iot/latest/developerguide/enhanced-custom-authentication.html
+* https://docs.aws.amazon.com/iot/latest/developerguide/enhanced-custom-auth-create.html
+* https://docs.aws.amazon.com/iot/latest/developerguide/config-custom-auth.html
+* https://docs.aws.amazon.com/iot/latest/apireference/API_CreateAuthorizer.html
+* https://docs.aws.amazon.com/cli/latest/reference/iot/create-authorizer.html
+* https://docs.aws.amazon.com/iot/latest/developerguide/iot-custom-endpoints-configurable-aws.html
+
+
+
+## TODO
+
+* Custom authorizer using signing enabled
+* use a real token example to authorize users based on token content
