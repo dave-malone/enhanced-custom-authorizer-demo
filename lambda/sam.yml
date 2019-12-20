@@ -7,3 +7,7 @@ Resources:
       Handler: index.handler
       Runtime: nodejs12.x
       Timeout: 5
+Outputs:
+  IoTEnhancedCustomAuthorizerArn:
+    Description: ARN of the Lambda function
+    Value: !GetAtt IoTEnhancedCustomAuthorizer.Arn

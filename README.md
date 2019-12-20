@@ -20,14 +20,11 @@ sam deploy --template-file ./lambda/packaged.yml \
   --stack-name iot-enhanced-custom-authorizer-lambda-stack \
   --capabilities CAPABILITY_IAM
 
-# Get the physical resource ID for the Lambda function so we can grab the Lambda function ARN
-aws cloudformation describe-stack-resources \
-  --stack-name iot-enhanced-custom-authorizer-lambda-stack \
-  --query 'StackResources[?ResourceType==`AWS::Lambda::Function`].PhysicalResourceId' \
-  --output text
-
 # Get the ARN for the deployed Lambda function
-aws lambda get-function --function-name lambdaPhysicalIdFromPreviousCommand --query 'Configuration.FunctionArn' --output text
+aws cloudformation describe-stacks \
+  --stack-name iot-enhanced-custom-authorizer-lambda-stack \
+  --query 'Stacks[0].Outputs[?OutputKey==`IoTEnhancedCustomAuthorizerArn`].OutputValue' \
+  --output text
 ```
 
 ## Configure your custom authorizer with AWS IoT
@@ -37,7 +34,7 @@ aws lambda get-function --function-name lambdaPhysicalIdFromPreviousCommand --qu
 ```bash
 aws iot create-authorizer \
   --authorizer-name "CustomAuthorizer" \
-  --authorizer-function-arn "arn:aws:lambda:us-east-1:xxxxxxxxxxxx:function:iot-enhanced-custom-autho" \
+  --authorizer-function-arn "arn:aws:lambda:us-east-1:xxxxxxxxxxxx:function:iot-enhanced-custom-autho-xxxx" \
   --status ACTIVE \
   --signing-disabled
 ```
@@ -56,7 +53,7 @@ The output of the above command, if successful, will contain the ARN for your cu
 
 ```bash
 aws lambda add-permission \
-  --function-name "arn:aws:lambda:us-east-1:xxxxxxxxxxxx:function:iot-enhanced-custom-autho" \
+  --function-name "arn:aws:lambda:us-east-1:xxxxxxxxxxxx:function:iot-enhanced-custom-autho-xxxx" \
   --principal iot.amazonaws.com \
   --source-arn "arn:aws:iot:us-east-1:xxxxxxxxxxxx:authorizer/CustomAuthorizer" \
   --statement-id Id-123 \
@@ -67,22 +64,19 @@ Now you should test your custom authorizer using the aws cli:
 
 ```bash
 aws iot test-invoke-authorizer \
-  --authorizer-name CustomAuthorizer \
+  --authorizer-name CustomAuthorizer2 \
   --http-context '{"headers":{}, "queryString": "?token=allow"}'
 ```
 
-3. After you've validated that the custom authorizer is working, set it as your default authorizer:
+3. Enhanced custom authorizers must be registered as part of configurable endpoints for AWS IoT Core. In this example, we will create a custom endpoint for an AWS-managed domain.
 
 ```bash
-# unsure if this is truly required - will test from scratch and vefiy
-aws iot set-default-authorizer --authorizer-name CustomAuthorizer
-```
+aws iot create-domain-configuration \
+  --domain-configuration-name "customAuthorizerDomainConfiguration" \
+  --service-type "DATA"
 
-4. Enhanced custom authorizers must be registered as part of configurable endpoints for AWS IoT Core. In this example, we will create a custom endpoint for an AWS-managed domain.
-
-```bash
-aws iot create-domain-configuration --domain-configuration-name "customAuthorizerDomainConfiguration" --service-type "DATA"
-aws iot describe-domain-configuration --domain-configuration-name "customAuthorizerDomainConfiguration"
+aws iot describe-domain-configuration \
+  --domain-configuration-name "customAuthorizerDomainConfiguration"
 ```
 The output of the `describe-domain-configuration` command above contains the Fully Qualified Domain Name (FQDN) you will need to use to connect your devices or applications to AWS IoT Core:
 
@@ -102,12 +96,12 @@ The output of the `describe-domain-configuration` command above contains the Ful
 }
 ```
 
-5. Finally, you need to update your domain configuration to use your custom authorizer:
+4. Finally, you need to update your domain configuration to use your custom authorizer:
 
 ```bash
 aws iot update-domain-configuration \
   --domain-configuration-name "customAuthorizerDomainConfiguration" \
-  --authorizer-config '{"allowAuthorizerOverride": true,"defaultAuthorizerName": "CustomAuthorizer"}'
+  --authorizer-config '{"allowAuthorizerOverride": true,"defaultAuthorizerName": "CustomAuthorizer2"}'
 ```
 
 ## Build awesome web applications with AWS Amplify
@@ -123,9 +117,11 @@ import React from 'react';
 import Amplify, { PubSub } from 'aws-amplify';
 import { MqttOverWSProvider } from "@aws-amplify/pubsub/lib/Providers";
 
+const mqtt_host = 'xxxxxxxxxxxxxxxxxxxx-ats.iot.us-east-1.amazonaws.com'
+
 Amplify.addPluggable(new MqttOverWSProvider({
   //here you would include your token as the query string parameter use to initialize the connection
-  aws_pubsub_endpoint: 'wss://xxxxxxxxxxxxxxxxxxxx-ats.iot.us-east-1.amazonaws.com/mqtt?token=allow',
+  aws_pubsub_endpoint: `wss://${mqtt_host}/mqtt?token=allow`,
 }));
 
 function MessageList(props){
