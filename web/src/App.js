@@ -2,10 +2,8 @@ import React from 'react';
 import Amplify, { PubSub } from 'aws-amplify';
 import { MqttOverWSProvider } from "@aws-amplify/pubsub/lib/Providers";
 
-//d0225830t54cg28qvwl9-ats.iot.us-east-1.amazonaws.com
-//a1tq0bx5we8tnk-beta.iot.us-east-1.amazonaws.com
-
-const mqtt_host = 'd01429663vv4xa7k3pbqd-ats.iot.us-east-1.amazonaws.com'
+//TODO - add your ATS-specific custom domain here
+const mqtt_host = 'xxxxxxxxxxxxxxxxxxxxx-ats.iot.us-east-1.amazonaws.com'
 
 Amplify.addPluggable(new MqttOverWSProvider({
      aws_pubsub_endpoint: `wss://${mqtt_host}/mqtt?token=allow`,
